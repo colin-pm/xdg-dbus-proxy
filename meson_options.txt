@@ -17,6 +17,12 @@ option(
   value : '',
 )
 option(
+  'systemd',
+  type : 'feature',
+  description : 'Support Systemd integration',
+  value : 'auto',
+)
+option(
   'tests',
   type : 'boolean',
   description : 'Build and run automated tests',

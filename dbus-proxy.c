@@ -30,6 +30,10 @@
 #include <errno.h>
 #include <locale.h>
 
+#ifdef HAVE_SYSTEMD
+#include <systemd/sd-daemon.h>
+#endif
+
 #include "flatpak-proxy.h"
 // Taken from glibc unistd.h
 #ifndef TEMP_FAILURE_RETRY
@@ -423,6 +427,10 @@ main (int argc, const char *argv[])
       g_io_add_watch (sync_channel, G_IO_ERR | G_IO_HUP,
                       sync_closed_cb, NULL);
     }
+
+#ifdef HAVE_SYSTEMD
+  sd_notify(0, "READY=1");
+#endif
 
   service_loop = g_main_loop_new (NULL, FALSE);
   g_main_loop_run (service_loop);

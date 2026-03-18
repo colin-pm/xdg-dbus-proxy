@@ -49,7 +49,15 @@ add_project_arguments(
 glib_dep = dependency('glib-2.0', version : '>=2.40')
 gio_dep = dependency('gio-2.0', version : '>=2.40')
 gio_unix_dep = dependency('gio-unix-2.0', version : '>=2.40')
-common_deps = [glib_dep, gio_dep, gio_unix_dep]
+
+opt_systemd = get_option('systemd')
+if opt_systemd.disabled()
+  systemd_dep = dependency('', required: false)
+else
+  systemd_dep = dependency('libsystemd', required: opt_systemd.enabled())
+endif
+
+common_deps = [glib_dep, gio_dep, gio_unix_dep, systemd_dep]
 
 if meson.is_subproject()
   bindir = get_option('libexecdir')
@@ -68,6 +76,11 @@ conf_data = configuration_data()
 conf_data.set_quoted('BINDIR', get_option('prefix') / bindir)
 conf_data.set_quoted('PACKAGE_NAME', meson.project_name())
 conf_data.set_quoted('PACKAGE_VERSION', meson.project_version())
+
+if systemd_dep.found()
+  conf_data.set('HAVE_SYSTEMD', 1)
+endif
+
 configure_file(output : 'config.h',
                configuration : conf_data)
 
