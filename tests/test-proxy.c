@@ -21,6 +21,8 @@
 #include <fcntl.h>
 #include <signal.h>
 #include <string.h>
+#include <sys/socket.h>
+#include <sys/un.h>
 #include <unistd.h>
 
 #include <glib.h>
@@ -192,6 +194,93 @@ test_basics (Fixture *f,
 }
 
 static void
+test_fd (Fixture *f,
+         gconstpointer context G_GNUC_UNUSED)
+{
+  g_autoptr(GSubprocessLauncher) launcher = NULL;
+  g_autoptr(GError) error = NULL;
+  g_autoptr(GVariant) tuple = NULL;
+  g_auto(GStrv) strv = NULL;
+  const char *proxied_name;
+  int sync_pipe[PIPE_FDS];
+  int listen_fd;
+  struct sockaddr_un addr;
+  char buf;
+  ssize_t bytes_read;
+  gsize i;
+  gboolean found;
+  g_autofree gchar *fd_arg = NULL;
+
+  alarm (30);
+
+  /* Create a listening Unix socket */
+  listen_fd = socket (AF_UNIX, SOCK_STREAM, 0);
+  g_assert_cmpint (listen_fd, >=, 0);
+
+  memset (&addr, 0, sizeof (addr));
+  addr.sun_family = AF_UNIX;
+  strncpy (addr.sun_path, f->proxy_socket, sizeof (addr.sun_path) - 1);
+
+  g_assert_cmpint (bind (listen_fd, (struct sockaddr *) &addr, sizeof (addr)), ==, 0);
+  g_assert_cmpint (listen (listen_fd, 1), ==, 0);
+
+  g_unix_open_pipe (sync_pipe, FD_CLOEXEC, &error);
+  g_assert_no_error (error);
+  f->sync_pipe = sync_pipe[READ_END];
+
+  launcher = g_subprocess_launcher_new (G_SUBPROCESS_FLAGS_STDOUT_PIPE);
+  /* sync_pipe is assigned to fd 3*/
+  g_subprocess_launcher_take_fd (launcher, sync_pipe[WRITE_END], 3);
+  sync_pipe[WRITE_END] = -1;
+  /* listen_fd is assigned to fd 4 */
+  g_subprocess_launcher_take_fd (launcher, listen_fd, 4);
+
+  fd_arg = g_strdup_printf ("fd:%d", 4);
+
+  f->proxy = g_subprocess_launcher_spawn (launcher, &error,
+                                          f->proxy_path,
+                                          "--fd=3",
+                                          f->dbus_address,
+                                          fd_arg,
+                                          NULL);
+  g_assert_no_error (error);
+  g_assert_nonnull (f->proxy);
+
+  /* Wait for the proxy to be ready */
+  bytes_read = read (sync_pipe[READ_END], &buf, 1);
+  g_assert_cmpint (bytes_read, ==, 1);
+
+  f->proxied_conn = g_dbus_connection_new_for_address_sync (f->proxy_address,
+                                                            G_DBUS_CONNECTION_FLAGS_AUTHENTICATION_CLIENT
+                                                            | G_DBUS_CONNECTION_FLAGS_MESSAGE_BUS_CONNECTION,
+                                                            NULL, NULL, &error);
+  g_assert_no_error (error);
+  g_assert_nonnull (f->proxied_conn);
+  proxied_name = g_dbus_connection_get_unique_name (f->proxied_conn);
+
+  tuple = g_dbus_connection_call_sync (f->proxied_conn, DBUS_SERVICE_DBUS,
+                                       DBUS_PATH_DBUS, DBUS_INTERFACE_DBUS,
+                                       "ListNames", NULL,
+                                       G_VARIANT_TYPE ("(as)"),
+                                       G_DBUS_CALL_FLAGS_NONE, -1, NULL,
+                                       &error);
+  g_assert_no_error (error);
+  g_assert_nonnull (tuple);
+  g_variant_get (tuple, "(^as)", &strv);
+  found = FALSE;
+
+  for (i = 0; strv[i] != NULL; i++)
+    {
+      g_test_message ("ListNames(): %s", strv[i]);
+
+      if (g_strcmp0 (strv[i], proxied_name) == 0)
+        found = TRUE;
+    }
+
+  g_assert_true (found);
+}
+
+static void
 teardown (Fixture *f,
           gconstpointer context G_GNUC_UNUSED)
 {
@@ -260,6 +349,7 @@ main (int argc,
   g_test_init (&argc, &argv, NULL);
 
   g_test_add ("/basics", Fixture, NULL, setup, test_basics, teardown);
+  g_test_add ("/fd", Fixture, NULL, setup, test_fd, teardown);
 
   return g_test_run ();
 }

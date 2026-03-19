@@ -53,7 +53,7 @@ static void usage (int ecode, FILE *out) G_GNUC_NORETURN;
 static void
 usage (int ecode, FILE *out)
 {
-  fprintf (out, "usage: %s [OPTIONS...] [ADDRESS PATH [OPTIONS...] ...]\n\n", argv0);
+  fprintf (out, "usage: %s [OPTIONS...] [ADDRESS (PATH|fd:FD) [OPTIONS...] ...]\n\n", argv0);
 
   fprintf (out,
            "Options:\n"
